@@ -60,7 +60,7 @@
 - Chats: finish an app-state recovery the primary answers after the waiter timed out, persisting the late snapshot and clearing that attempt's replay markers. Thanks @nicolasbiondic (#489).
 - Chats: on collections whose full sync is known not to verify, let chat-state writes proceed after an incremental sync instead of a failing full replay and a five-minute wait for the phone; only the pre-write attempt marker is cleared, while older recovery intents and each write's post-send intent are kept until a verified full replay or a primary recovery snapshot covers them. Thanks @nicolasbiondic (#490).
 - Release: expose the shared workflow’s nonpublishing dry run for dependency and toolchain verification.
-- Messages: keep Click-to-WhatsApp ad referrals (ad ID, source, headline, click ID) and expose them as `ad_referral` in message JSON.
+- Messages: keep Click-to-WhatsApp ad referrals (ad ID, source, headline, media type, click ID) and expose them as `ad_referral` in message JSON, sync webhook payloads, and a `messages show` line. Each text field is capped at 1024 bytes and thumbnails are not stored. Thanks @nicolasbiondic (#473).
 
 ## 0.21.0 - 2026-10-11
 
