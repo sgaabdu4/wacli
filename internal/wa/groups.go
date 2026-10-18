@@ -56,6 +56,16 @@ func (c *Client) GetJoinedGroups(ctx context.Context) ([]*types.GroupInfo, error
 	return cli.GetJoinedGroups(ctx)
 }
 
+func (c *Client) SetGroupPhoto(ctx context.Context, jid types.JID, photo []byte) (string, error) {
+	c.mu.Lock()
+	client := c.client
+	c.mu.Unlock()
+	if client == nil || !client.IsConnected() {
+		return "", fmt.Errorf("not connected")
+	}
+	return client.SetGroupPhoto(ctx, jid, photo)
+}
+
 func (c *Client) SetGroupName(ctx context.Context, jid types.JID, name string) error {
 	c.mu.Lock()
 	cli := c.client
