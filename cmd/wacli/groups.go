@@ -12,6 +12,7 @@ func newGroupsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newGroupsRefreshCmd(flags))
 	cmd.AddCommand(newGroupsInfoCmd(flags))
 	cmd.AddCommand(newGroupsRenameCmd(flags))
+	cmd.AddCommand(newGroupsSetPictureCmd(flags))
 	cmd.AddCommand(newGroupsTopicCmd(flags, "topic"))
 	cmd.AddCommand(newGroupsTopicCmd(flags, "description"))
 	cmd.AddCommand(newGroupsAnnounceOnlyCmd(flags))

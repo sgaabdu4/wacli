@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +16,7 @@ import (
 
 func TestGroupsAdminCommandsRegistered(t *testing.T) {
 	cmd := newGroupsCmd(&rootFlags{})
-	for _, name := range []string{"create", "topic", "description", "announce-only", "locked", "requests"} {
+	for _, name := range []string{"create", "set-picture", "topic", "description", "announce-only", "locked", "requests"} {
 		if got, _, err := cmd.Find([]string{name}); err != nil || got == nil || got.Name() != name {
 			t.Fatalf("groups command %q not registered: got=%v err=%v", name, got, err)
 		}
@@ -33,6 +35,26 @@ func TestParseGroupJIDRejectsNonGroup(t *testing.T) {
 	}
 	if jid.Server != types.GroupServer {
 		t.Fatalf("server = %q, want %q", jid.Server, types.GroupServer)
+	}
+}
+
+func TestGroupsSetPictureRejectsInvalidInputBeforeOpeningStore(t *testing.T) {
+	for _, photo := range []string{"", "not a JPEG"} {
+		path := filepath.Join(t.TempDir(), "picture.jpg")
+		if err := os.WriteFile(path, []byte(photo), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for _, jid := range []string{"123@s.whatsapp.net", "123@g.us"} {
+			cmd := newGroupsSetPictureCmd(&rootFlags{})
+			err := cmd.RunE(cmd, []string{jid, path})
+			want := "picture must be JPEG"
+			if jid == "123@s.whatsapp.net" {
+				want = "@g.us"
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want %s", err, want)
+			}
+		}
 	}
 }
 
