@@ -8,7 +8,7 @@ import (
 
 // downgradeToBeforeAdReferral rewrites a store the way v0.21.0 left it: no
 // ad_referral column, a change trigger that does not compare it, and no record
-// of migration 33.
+// of migration 34.
 func downgradeToBeforeAdReferral(t *testing.T, db *DB) {
 	t.Helper()
 	for _, name := range []string{"retrieval_messages_insert", "retrieval_messages_update", "retrieval_messages_delete"} {
@@ -29,8 +29,8 @@ func downgradeToBeforeAdReferral(t *testing.T, db *DB) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	if _, err := db.sql.Exec(`DELETE FROM schema_migrations WHERE version = 33`); err != nil {
-		t.Fatalf("forget migration 33: %v", err)
+	if _, err := db.sql.Exec(`DELETE FROM schema_migrations WHERE version = 34`); err != nil {
+		t.Fatalf("forget migration 34: %v", err)
 	}
 }
 
@@ -141,5 +141,38 @@ func TestReferralOnlyEnrichmentIsJournaledAfterUpgradingFromBeforeAdReferral(t *
 	}
 	if len(before.Changes) != 1 {
 		t.Fatalf("upgrade reseeded the journal: %d entries before enrichment", len(before.Changes))
+	}
+}
+
+func TestStoreMigratedByEarlierAdReferralBuildGainsChatArchiveColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "wacli.db")
+	db := mustOpen(t, path)
+	for _, column := range []string{"archive_action_ms", "archive_incoming_ms", "archive_cleared_ms", "archive_setting_min_ms"} {
+		if _, err := db.sql.Exec(`ALTER TABLE chats DROP COLUMN ` + column); err != nil {
+			t.Fatalf("drop %s: %v", column, err)
+		}
+	}
+	if _, err := db.sql.Exec(`DROP TABLE chat_archive_setting`); err != nil {
+		t.Fatalf("drop chat_archive_setting: %v", err)
+	}
+	if _, err := db.sql.Exec(`UPDATE schema_migrations SET name = 'messages ad_referral column' WHERE version = 33`); err != nil {
+		t.Fatalf("rename migration 33: %v", err)
+	}
+	if _, err := db.sql.Exec(`DELETE FROM schema_migrations WHERE version = 34`); err != nil {
+		t.Fatalf("forget migration 34: %v", err)
+	}
+	db.Close()
+
+	reopened := mustOpen(t, path)
+	defer reopened.Close()
+	for _, column := range []string{"archive_action_ms", "archive_incoming_ms", "archive_cleared_ms", "archive_setting_min_ms"} {
+		has, err := reopened.tableHasColumn("chats", column)
+		if err != nil || !has {
+			t.Fatalf("chats.%s after reopen: has=%v err=%v", column, has, err)
+		}
+	}
+	var applied int
+	if err := reopened.sql.QueryRow(`SELECT count(*) FROM schema_migrations WHERE version = 34 AND name = 'messages ad_referral column'`).Scan(&applied); err != nil || applied != 1 {
+		t.Fatalf("migration 34 recorded = %d, err = %v", applied, err)
 	}
 }
