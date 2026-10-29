@@ -433,3 +433,33 @@ func TestGroupInfoConcurrentMissesShareLookup(t *testing.T) {
 	<-done
 	assertGroupInfoCalls(t, f.fakeWA, 1)
 }
+
+func TestJoinedGroupIsSavedWithoutAMessage(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	ctx := context.Background()
+
+	handlerID, _ := a.addSyncEventHandler(
+		ctx,
+		SyncOptions{Mode: SyncModeFollow},
+		new(atomic.Int64),
+		new(atomic.Int64),
+		make(chan struct{}, 1),
+		make(chan struct{}, 1),
+		make(chan staleReconnectRequest, 1),
+		func(string, string) {},
+		nil,
+		nil,
+		&syncPresence{},
+		nil,
+	)
+	defer f.RemoveEventHandler(handlerID)
+
+	f.emit(&events.JoinedGroup{GroupInfo: *testGroup("Alerts")})
+
+	assertGroupChatName(t, a, "Alerts")
+	if got := storedParticipants(t, a); got != 1 {
+		t.Fatalf("stored participants = %d, want 1", got)
+	}
+}
