@@ -166,6 +166,8 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.forgetGroupInfo(v.JID)
 		case *events.JoinedGroup:
 			a.forgetGroupInfo(v.JID)
+			_ = a.storeGroupInfo(ctx, &v.GroupInfo)
+			_ = a.db.UpsertChatMetadata(v.JID.String(), "group", v.GroupInfo.GroupName.Name)
 		case *events.UndecryptableMessage:
 			if v == nil {
 				return
