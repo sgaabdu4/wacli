@@ -937,7 +937,6 @@ func isRetryableStoreError(err error) bool {
 	return errors.As(err, &sqliteErr) && (sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked)
 }
 
-// WhatsApp acknowledged the message before it reached the store, so a lost save is never resent.
 func (a *App) storeLiveMessage(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage, options messageStoreOptions, limits ...*syncStorageLimits) error {
 	for attempt := 0; ; attempt++ {
 		var err error
