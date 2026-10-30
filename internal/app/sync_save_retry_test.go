@@ -3,7 +3,11 @@ package app
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -204,5 +208,102 @@ func TestLiveSaveRetryDelaysAreShortAndBounded(t *testing.T) {
 		if liveSaveRetryDelays[i] != want[i] {
 			t.Fatalf("delays = %v, want %v", liveSaveRetryDelays, want)
 		}
+	}
+}
+
+func TestLiveSyncRetriesWhenAnotherConnectionHoldsTheWriteLock(t *testing.T) {
+	a, evt, eventLog := newSaveRetryApp(t)
+	raw := openRawWacliDB(t, a)
+	raw.SetMaxOpenConns(1)
+	if _, err := raw.Exec("BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = raw.Exec("ROLLBACK") })
+	a.opts.Events = out.NewEventWriter(&releaseOnRetryWriter{Buffer: eventLog, release: func() {
+		if _, err := raw.Exec("ROLLBACK"); err != nil {
+			t.Error(err)
+		}
+	}}, true)
+
+	var stored atomic.Int64
+	a.handleLiveSyncMessage(context.Background(), SyncOptions{}, evt, &stored, func(string, string) {}, nil)
+
+	var rows int
+	if err := raw.QueryRow("SELECT count(*) FROM messages WHERE msg_id = ?", evt.Info.ID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 || stored.Load() != 1 {
+		t.Fatalf("message rows = %d, stored = %d, want 1 and 1", rows, stored.Load())
+	}
+	warnings := warningEvents(t, eventLog)
+	if len(warnings) != 1 || warnings[0]["code"] != "live_message_save_retry" {
+		t.Fatalf("warnings = %v, want exactly one retry", warnings)
+	}
+}
+
+type releaseOnRetryWriter struct {
+	*bytes.Buffer
+	release func()
+}
+
+func (w *releaseOnRetryWriter) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if bytes.Contains(p, []byte(`"code":"live_message_save_retry"`)) && w.release != nil {
+		release := w.release
+		w.release = nil
+		release()
+	}
+	return n, err
+}
+
+func TestStoreErrorMatchingUsesTheDriverCodes(t *testing.T) {
+	open := func(dsn string) *sql.DB {
+		db, err := sql.Open("sqlite3", dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db.SetMaxOpenConns(1)
+		t.Cleanup(func() { _ = db.Close() })
+		return db
+	}
+	mustExec := func(db *sql.DB, query string) {
+		t.Helper()
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertRetryable := func(err error, code sqlite3.ErrNo, extended sqlite3.ErrNoExtended) {
+		t.Helper()
+		var sqliteErr sqlite3.Error
+		if !errors.As(err, &sqliteErr) || sqliteErr.Code != code || sqliteErr.ExtendedCode != extended {
+			t.Fatalf("driver error = %T %v, want code %d extended %d", err, err, code, extended)
+		}
+		if !isRetryableStoreError(fmt.Errorf("wrapped: %w", err)) {
+			t.Fatalf("wrapped %v was not retryable", err)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "locks.db")
+	first, second := open(path+"?_busy_timeout=1"), open(path+"?_busy_timeout=1")
+	mustExec(first, "CREATE TABLE sample (n INTEGER)")
+	mustExec(first, "BEGIN IMMEDIATE")
+	_, err := second.Exec("INSERT INTO sample VALUES (1)")
+	assertRetryable(err, sqlite3.ErrBusy, sqlite3.ErrNoExtended(sqlite3.ErrBusy))
+	mustExec(first, "ROLLBACK")
+
+	shared := "file:" + filepath.Join(t.TempDir(), "shared.db") + "?cache=shared&_busy_timeout=1"
+	reader, writer := open(shared), open(shared)
+	mustExec(reader, "CREATE TABLE sample (n INTEGER)")
+	mustExec(reader, "BEGIN")
+	var n int
+	if err := reader.QueryRow("SELECT count(*) FROM sample").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	_, err = writer.Exec("INSERT INTO sample VALUES (1)")
+	assertRetryable(err, sqlite3.ErrLocked, sqlite3.ErrLockedSharedCache)
+	mustExec(reader, "ROLLBACK")
+
+	if isRetryableStoreError(errors.New("database is locked")) {
+		t.Fatal("an error with only the lock text was treated as retryable")
 	}
 }
