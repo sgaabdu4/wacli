@@ -951,22 +951,23 @@ func (a *App) storeLiveMessage(ctx context.Context, opts SyncOptions, pm wa.Pars
 			return nil
 		}
 		final := attempt >= len(liveSaveRetryDelays) || !isRetryableStoreError(err) || ctx.Err() != nil
-		code := "live_message_save_retry"
-		if final {
-			code = "live_message_save_failed"
+		warn := func(code string) {
+			chat := canonicalJIDString(pm.Chat)
+			a.emitWarning(
+				code,
+				fmt.Sprintf("warning: failed to save message %s in %s (attempt %d): %v", pm.ID, chat, attempt+1, err),
+				map[string]any{"chat_jid": chat, "msg_id": pm.ID, "attempt": attempt + 1, "error": err.Error()},
+			)
 		}
-		chat := canonicalJIDString(pm.Chat)
-		a.emitWarning(
-			code,
-			fmt.Sprintf("warning: failed to save message %s in %s (attempt %d): %v", pm.ID, chat, attempt+1, err),
-			map[string]any{"chat_jid": chat, "msg_id": pm.ID, "attempt": attempt + 1, "error": err.Error()},
-		)
 		if final {
+			warn("live_message_save_failed")
 			return err
 		}
+		warn("live_message_save_retry")
 		select {
 		case <-time.After(liveSaveRetryDelays[attempt]):
 		case <-ctx.Done():
+			warn("live_message_save_failed")
 			return err
 		}
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattn/go-sqlite3"
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/wa"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -147,5 +148,49 @@ func TestLiveSyncWarnsOnceWithoutRetryForPermanentStoreError(t *testing.T) {
 	}
 	if stored.Load() != 0 {
 		t.Fatalf("messages stored = %d, want 0", stored.Load())
+	}
+}
+
+type cancelOnRetryWriter struct {
+	bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *cancelOnRetryWriter) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if bytes.Contains(p, []byte(`"code":"live_message_save_retry"`)) {
+		w.cancel()
+	}
+	return n, err
+}
+
+func TestLiveSyncWarnsWhenCancelledDuringRetryWait(t *testing.T) {
+	a, evt, _ := newSaveRetryApp(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log := &cancelOnRetryWriter{cancel: cancel}
+	a.opts.Events = out.NewEventWriter(log, true)
+	liveSaveRetryDelays = []time.Duration{time.Hour}
+	var attempts int
+	opts := SyncOptions{failLiveStore: func(int) error {
+		attempts++
+		return sqlite3.Error{Code: sqlite3.ErrBusy}
+	}}
+
+	err := a.storeLiveMessage(ctx, opts, wa.ParseLiveMessage(evt), messageStoreOptions{})
+
+	if err == nil {
+		t.Fatal("expected the save to fail")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1: nothing may be written after cancellation", attempts)
+	}
+	warnings := warningEvents(t, &log.Buffer)
+	if len(warnings) != 2 {
+		t.Fatalf("warnings = %v, want a retry then a final failure", warnings)
+	}
+	last := warnings[1]
+	if last["code"] != "live_message_save_failed" || last["chat_jid"] != evt.Info.Chat.String() || last["msg_id"] != evt.Info.ID || last["attempt"] != float64(1) {
+		t.Fatalf("final warning = %v", last)
 	}
 }
