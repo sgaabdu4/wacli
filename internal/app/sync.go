@@ -79,6 +79,7 @@ type SyncOptions struct {
 	WebhookAllowPrivate bool
 	WebhookEvents       SyncWebhookEventSet // nil = messages only
 	afterHistorySync    func(*events.HistorySync)
+	failLiveStore       func(attempt int) error
 }
 
 type SyncResult struct {
