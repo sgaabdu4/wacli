@@ -780,7 +780,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 					a.emitWarning(
 						"encrypted_edit_parse_failed",
 						fmt.Sprintf("warning: failed to parse encrypted edit %s: %v", pm.ID, err),
-						map[string]any{"msg_id": pm.ID, "error": err.Error()},
+						map[string]any{"message_id": pm.ID, "error": err.Error()},
 					)
 					continue
 				}
@@ -801,7 +801,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 					a.emitWarning(
 						"encrypted_reaction_parse_failed",
 						fmt.Sprintf("warning: failed to parse encrypted reaction message %s: %v", pm.ID, err),
-						map[string]any{"msg_id": pm.ID, "error": err.Error()},
+						map[string]any{"message_id": pm.ID, "error": err.Error()},
 					)
 				} else {
 					a.decryptEncryptedReaction(ctx, &pm, evt)
@@ -985,7 +985,7 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 		a.emitWarning(
 			"encrypted_reaction_decrypt_failed",
 			fmt.Sprintf("warning: failed to decrypt reaction message %s: %v", pm.ID, err),
-			map[string]any{"msg_id": pm.ID, "error": err.Error()},
+			map[string]any{"message_id": pm.ID, "error": err.Error()},
 		)
 		return
 	}
