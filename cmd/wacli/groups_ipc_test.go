@@ -78,6 +78,38 @@ func TestLiveGroupReadsWithoutSyncNeverOpenAnotherSession(t *testing.T) {
 	}
 }
 
+func TestGroupReadWaitsForStartupSocketWhileSyncOwnsStore(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lk.Release()
+	server := make(chan func(), 1)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(_ context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+			return sendDelegateResponse{OK: true, GroupInfo: &types.GroupInfo{GroupName: types.GroupName{Name: "Support"}}}, nil
+		})
+		if err != nil {
+			server <- func() {}
+			return
+		}
+		server <- stop
+	}()
+	defer func() { (<-server)() }()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	resp, err := delegateSend(ctx, &rootFlags{storeDir: storeDir, timeout: time.Second}, sendDelegateRequest{Kind: groupsInfoKind, To: "support@g.us"})
+	if err != nil {
+		t.Fatalf("group read did not wait for saving sync socket: %v", err)
+	}
+	if resp.GroupInfo == nil || resp.GroupInfo.GroupName.Name != "Support" {
+		t.Fatal("group response was lost after startup")
+	}
+}
+
 type groupReadWA struct {
 	app.WAClient
 	info *types.GroupInfo

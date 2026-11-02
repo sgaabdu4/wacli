@@ -128,13 +128,26 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 		return sendDelegateResponse{}, err
 	}
 	conn, err := delegate.Dial(ctx, storeDir)
+	liveGroupRead := req.Kind == groupsInfoKind || req.Kind == groupsInviteLinkKind || req.Kind == groupsRefreshKind
+	for err != nil && liveGroupRead && ctx.Err() == nil {
+		locked, _, probeErr := lock.Probe(storeDir)
+		if probeErr != nil || !locked {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return sendDelegateResponse{}, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+		conn, err = delegate.Dial(ctx, storeDir)
+	}
 	if err != nil {
 		return sendDelegateResponse{}, fmt.Errorf("%w: %v", errSendDelegateUnavailable, err)
 	}
 	defer conn.Close()
 
 	deadline := time.Now().Add(commandTimeout(flags))
-	if req.Kind == mediaDownloadKind {
+	if req.Kind == mediaDownloadKind || liveGroupRead {
 		// Cache inspection and lock waits already consumed this command's
 		// budget. Never grant recovery a new full timeout after those stages.
 		if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
