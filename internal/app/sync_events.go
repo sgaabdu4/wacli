@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mattn/go-sqlite3"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
@@ -930,11 +929,6 @@ func (a *App) emitSyncProgress(total int64) {
 		return
 	}
 	a.emitOrPrint("progress", map[string]any{"messages_synced": total}, "\rSynced %d messages...", total)
-}
-
-func isRetryableStoreError(err error) bool {
-	var sqliteErr sqlite3.Error
-	return errors.As(err, &sqliteErr) && (sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked)
 }
 
 func (a *App) storeLiveMessage(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage, options messageStoreOptions, limits ...*syncStorageLimits) error {
