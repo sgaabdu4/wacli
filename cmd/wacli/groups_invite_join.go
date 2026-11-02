@@ -42,26 +42,15 @@ func newGroupsInviteLinkGetCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			gjid, err := parseGroupJID(jidStr)
 			if err != nil {
 				return err
 			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
+			resp, delegateErr := delegateSend(ctx, flags, sendDelegateRequest{Kind: groupsInviteLinkKind, To: jidStr})
+			if delegateErr != nil {
+				return fmt.Errorf("group invite read needs a running sync to save incoming messages; start `wacli sync` and retry: %w", delegateErr)
 			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			link, err := a.WA().GetGroupInviteLink(ctx, gjid, false)
-			if err != nil {
-				return err
-			}
+			link := resp.GroupLink
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "link": link})
 			}
