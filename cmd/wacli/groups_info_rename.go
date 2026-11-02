@@ -11,7 +11,6 @@ import (
 
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
-	"go.mau.fi/whatsmeow/types"
 )
 
 func newGroupsSetPictureCmd(flags *rootFlags) *cobra.Command {
@@ -36,21 +35,11 @@ func newGroupsSetPictureCmd(flags *rootFlags) *cobra.Command {
 			}
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
-			a, lock, err := newApp(ctx, flags, true, false)
+			resp, err := delegateGroupMutation(ctx, flags, sendDelegateRequest{GroupAction: "picture", To: jid.String(), GroupPhoto: photo})
 			if err != nil {
 				return err
 			}
-			defer closeApp(a, lock)
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			id, err := a.WA().SetGroupPhoto(ctx, jid, photo)
-			if err != nil {
-				return err
-			}
+			id := resp.PictureID
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid.String(), "picture_id": id})
 			}
@@ -124,28 +113,12 @@ func newGroupsRenameCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			gjid, err := parseGroupJID(jidStr)
 			if err != nil {
 				return err
 			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
+			if _, err := delegateGroupMutation(ctx, flags, sendDelegateRequest{GroupAction: "rename", To: gjid.String(), Name: name}); err != nil {
 				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			if err := a.WA().SetGroupName(ctx, gjid, name); err != nil {
-				return err
-			}
-			if info, err := a.WA().GetGroupInfo(ctx, gjid); err == nil && info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
 			}
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "name": name})
@@ -174,26 +147,13 @@ func newGroupsLeaveCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
+			gjid, err := parseGroupJID(jidStr)
 			if err != nil {
 				return err
 			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
+			if _, err := delegateGroupMutation(ctx, flags, sendDelegateRequest{GroupAction: "leave", To: gjid.String()}); err != nil {
 				return err
 			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			if err := a.WA().LeaveGroup(ctx, gjid); err != nil {
-				return err
-			}
-			_ = a.DB().MarkGroupLeft(gjid.String(), time.Now().UTC())
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "left": true})
 			}

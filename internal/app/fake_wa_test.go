@@ -60,6 +60,7 @@ type fakeWA struct {
 
 	groupInfoCalls int
 	groupInfoErr   error
+	onGroupWrite   func()
 	onGroupInfo    func() // runs while a group info lookup is in flight
 
 	getAllContactsErr           error
@@ -454,6 +455,9 @@ func (f *fakeWA) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupI
 }
 
 func (f *fakeWA) CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*types.GroupInfo, error) {
+	if f.onGroupWrite != nil {
+		f.onGroupWrite()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	jid := types.NewJID(fmt.Sprintf("group-%d", len(f.groups)+1), types.GroupServer)
@@ -476,10 +480,16 @@ func (f *fakeWA) CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*t
 }
 
 func (f *fakeWA) SetGroupPhoto(ctx context.Context, jid types.JID, photo []byte) (string, error) {
+	if f.onGroupWrite != nil {
+		f.onGroupWrite()
+	}
 	return "picture-id", nil
 }
 
 func (f *fakeWA) SetGroupName(ctx context.Context, jid types.JID, name string) error {
+	if f.onGroupWrite != nil {
+		f.onGroupWrite()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	g := f.groups[jid]
@@ -528,6 +538,9 @@ func (f *fakeWA) SetGroupLocked(ctx context.Context, jid types.JID, locked bool)
 }
 
 func (f *fakeWA) UpdateGroupParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error) {
+	if f.onGroupWrite != nil {
+		f.onGroupWrite()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	g := f.groups[group]
@@ -578,7 +591,12 @@ func (f *fakeWA) JoinGroupWithLink(ctx context.Context, code string) (types.JID,
 	return types.ParseJID("12345@g.us")
 }
 
-func (f *fakeWA) LeaveGroup(ctx context.Context, group types.JID) error { return nil }
+func (f *fakeWA) LeaveGroup(ctx context.Context, group types.JID) error {
+	if f.onGroupWrite != nil {
+		f.onGroupWrite()
+	}
+	return nil
+}
 
 func (f *fakeWA) GetNewsletterInfoWithInvite(ctx context.Context, key string) (*types.NewsletterMetadata, error) {
 	f.mu.Lock()
