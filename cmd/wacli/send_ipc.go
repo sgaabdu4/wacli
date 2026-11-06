@@ -534,6 +534,7 @@ func executeDelegatedGroupMutation(ctx context.Context, db *store.DB, client app
 			return resp, fmt.Errorf("picture must be JPEG: %w", decodeErr)
 		}
 		resp.PictureID, err = client.SetGroupPhoto(ctx, jid, req.GroupPhoto)
+		return resp, err
 	case "leave":
 		err = client.LeaveGroup(ctx, jid)
 		if err == nil {
