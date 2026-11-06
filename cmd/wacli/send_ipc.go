@@ -136,8 +136,8 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 		return sendDelegateResponse{}, err
 	}
 	conn, err := delegate.Dial(ctx, storeDir)
-	liveGroupRead := req.Kind == groupsInfoKind || req.Kind == groupsInviteLinkKind || req.Kind == groupsRefreshKind
-	for err != nil && liveGroupRead && ctx.Err() == nil {
+	savingGroupCommand := req.Kind == groupsInfoKind || req.Kind == groupsInviteLinkKind || req.Kind == groupsRefreshKind || req.Kind == groupsMutateKind
+	for err != nil && savingGroupCommand && ctx.Err() == nil {
 		locked, _, probeErr := lock.Probe(storeDir)
 		if probeErr != nil || !locked {
 			break
@@ -155,7 +155,7 @@ func delegateSend(ctx context.Context, flags *rootFlags, req sendDelegateRequest
 	defer conn.Close()
 
 	deadline := time.Now().Add(commandTimeout(flags))
-	if req.Kind == mediaDownloadKind || liveGroupRead {
+	if req.Kind == mediaDownloadKind || savingGroupCommand {
 		// Cache inspection and lock waits already consumed this command's
 		// budget. Never grant recovery a new full timeout after those stages.
 		if parentDeadline, ok := ctx.Deadline(); ok && parentDeadline.Before(deadline) {
@@ -289,6 +289,9 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 	// paced request may intentionally run longer than five minutes, so keep the
 	// transport alive through its budget and the final response write.
 	_ = conn.SetDeadline(deadline.Add(sendDelegateResponseGrace))
+	if req.Kind == groupsMutateKind {
+		go func() { _, _ = io.Copy(io.Discard, conn); cancel() }()
+	}
 
 	if req.Kind == mediaDownloadKind {
 		if mediaSlot == nil || req.Version != sendDelegateVersion {
@@ -558,6 +561,8 @@ func executeDelegatedGroupMutation(ctx context.Context, db *store.DB, client app
 }
 
 func delegateGroupMutation(ctx context.Context, flags *rootFlags, req sendDelegateRequest) (sendDelegateResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 55*time.Second)
+	defer cancel()
 	req.Kind = groupsMutateKind
 	resp, err := delegateSend(ctx, flags, req)
 	if err != nil {

@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/jpeg"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,6 +244,62 @@ func TestGroupWritesWithoutSyncNeverOpenAnotherSession(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(storeDir, "session.db")); !os.IsNotExist(err) {
 			t.Error("write opened a standalone WhatsApp session")
 		}
+	}
+}
+
+func TestQueuedGroupWriteIsCanceledWhenCallerClosesSocket(t *testing.T) {
+	server, caller := net.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer caller.Close()
+	slot := make(chan struct{}, 1)
+	called := make(chan struct{}, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handleSendDelegateConn(ctx, server, func(context.Context, sendDelegateRequest) (sendDelegateResponse, error) {
+			called <- struct{}{}
+			return sendDelegateResponse{OK: true}, nil
+		}, slot, newSendPacer(sendSpacing{}))
+	}()
+	if err := json.NewEncoder(caller).Encode(sendDelegateRequest{Version: sendDelegateVersion, Kind: groupsMutateKind, GroupAction: "create", TimeoutMS: durationMillis(5 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	caller.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+		t.Fatal("queued group mutation survived its caller")
+	}
+	slot <- struct{}{}
+	select {
+	case <-called:
+		t.Fatal("group mutation ran after its caller closed")
+	default:
+	}
+}
+
+func TestGroupMutationDeadlineFitsWorkerProcessBudget(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	called := make(chan sendDelegateRequest, 1)
+	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(_ context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		called <- req
+		return sendDelegateResponse{OK: true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	started := time.Now()
+	if _, err := delegateGroupMutation(context.Background(), &rootFlags{storeDir: storeDir, timeout: 5 * time.Minute}, sendDelegateRequest{GroupAction: "leave", To: "support@g.us"}); err != nil {
+		t.Fatal(err)
+	}
+	req := <-called
+	if req.DeadlineUnixMS <= started.UnixMilli() || req.DeadlineUnixMS > started.Add(56*time.Second).UnixMilli() {
+		t.Fatal("group write can outlive the worker's sixty-second subprocess budget")
 	}
 }
 
