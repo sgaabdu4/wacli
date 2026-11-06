@@ -75,32 +75,13 @@ func newGroupsInfoCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
+			resp, delegateErr := delegateSend(ctx, flags, sendDelegateRequest{Kind: groupsInfoKind, To: jidStr})
+			if delegateErr != nil {
+				return fmt.Errorf("group info needs a running sync to save incoming messages; start `wacli sync` and retry: %w", delegateErr)
 			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			info, err := a.WA().GetGroupInfo(ctx, gjid)
-			if err != nil {
-				return err
-			}
+			info := resp.GroupInfo
 			if info == nil {
-				return fmt.Errorf("group info not found for %s", gjid.String())
-			}
-			if info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
+				return fmt.Errorf("group info is unavailable; upgrade the running sync and retry")
 			}
 
 			if flags.asJSON {

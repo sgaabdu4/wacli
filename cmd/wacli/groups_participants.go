@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
 	"go.mau.fi/whatsmeow/types"
@@ -42,15 +44,30 @@ their local participant snapshots.`,
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, false, false)
-			if err != nil {
-				return err
+			var participants []store.GroupParticipant
+			var delegateErr error = errSendDelegateUnavailable
+			if !flags.isReadOnly() {
+				var resp sendDelegateResponse
+				resp, delegateErr = delegateSend(ctx, flags, sendDelegateRequest{Kind: groupsParticipantsKind, To: group})
+				participants = resp.Participants
 			}
-			defer closeApp(a, lk)
+			if delegateErr != nil {
+				if !errors.Is(delegateErr, errSendDelegateUnavailable) {
+					return delegateErr
+				}
+				a, lk, err := newApp(ctx, flags, false, false)
+				if err != nil {
+					return err
+				}
+				defer closeApp(a, lk)
 
-			participants, err := a.DB().ListGroupParticipants(group)
-			if err != nil {
-				return err
+				participants, err = a.DB().ListGroupParticipants(group)
+				if err != nil {
+					return err
+				}
+			}
+			if participants == nil {
+				participants = []store.GroupParticipant{}
 			}
 
 			if flags.asJSON {

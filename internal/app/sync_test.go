@@ -27,6 +27,45 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func TestSyncSavesIncomingMessageDuringConnectedGroupRead(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	group := types.NewJID("support", types.GroupServer)
+	f.groups[group] = &types.GroupInfo{JID: group, GroupName: types.GroupName{Name: "Support"}}
+	chat := types.NewJID("member", types.DefaultUserServer)
+	f.onGroupInfo = func() {
+		f.emit(&events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{Chat: chat, Sender: chat},
+				ID:            "during-group-read", Timestamp: time.Now(),
+			},
+			Message: &waProto.Message{Conversation: proto.String("synthetic")},
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode: SyncModeOnce, IdleExit: time.Millisecond,
+		AfterConnect: func(ctx context.Context) error {
+			_, err := a.WA().GetGroupInfo(ctx, group)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := a.DB().GetMessage(chat.String(), "during-group-read")
+	if err != nil || message.FromMe {
+		t.Fatal("incoming message was not saved during group read")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.connectCalls != 1 {
+		t.Fatal("group read reconnected sync")
+	}
+}
+
 func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

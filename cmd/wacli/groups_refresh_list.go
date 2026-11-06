@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"time"
 
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/spf13/cobra"
@@ -22,41 +21,16 @@ func newGroupsRefreshCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
+			resp, delegateErr := delegateSend(ctx, flags, sendDelegateRequest{Kind: groupsRefreshKind})
+			if delegateErr != nil {
+				return fmt.Errorf("group refresh needs a running sync to save incoming messages; start `wacli sync` and retry: %w", delegateErr)
 			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			gs, err := a.WA().GetJoinedGroups(ctx)
-			if err != nil {
-				return err
-			}
-			joined := map[string]bool{}
-			now := time.Now().UTC()
-			for _, g := range gs {
-				if g == nil {
-					continue
-				}
-				joined[g.JID.String()] = true
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), g)
-				_ = a.DB().UpsertChatMetadata(g.JID.String(), "group", g.GroupName.Name)
-			}
-			if err := a.DB().MarkGroupsMissingFrom(joined, now); err != nil {
-				return err
-			}
+			count := resp.Groups
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"groups": len(gs)})
+				return out.WriteJSON(os.Stdout, map[string]any{"groups": count})
 			}
-			fmt.Fprintf(os.Stdout, "Imported %d groups.\n", len(gs))
+			fmt.Fprintf(os.Stdout, "Imported %d groups.\n", count)
 			return nil
 		},
 	}

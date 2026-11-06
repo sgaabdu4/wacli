@@ -15,6 +15,7 @@ import (
 	"github.com/openclaw/wacli/internal/delegate"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -22,6 +23,10 @@ import (
 const (
 	sendDelegateVersion       = 1
 	sendDelegateResponseGrace = 5 * time.Second
+	groupsInfoKind            = "groups_info"
+	groupsInviteLinkKind      = "groups_invite_link"
+	groupsParticipantsKind    = "groups_participants"
+	groupsRefreshKind         = "groups_refresh"
 	// sendDelegateReplyMargin is reserved before the caller's deadline so a
 	// refusal can reach the caller before it gives up on the connection. An
 	// explicit "not sent" is only useful if it arrives.
@@ -106,6 +111,11 @@ type sendDelegateResponse struct {
 	Contact        *contactSaveResult   `json:"contact,omitempty"`
 	Presence       *app.PresenceState   `json:"presence,omitempty"`
 	Media          *mediaDownloadResult `json:"media,omitempty"`
+
+	GroupInfo    *types.GroupInfo         `json:"group_info,omitempty"`
+	GroupLink    string                   `json:"group_link,omitempty"`
+	Participants []store.GroupParticipant `json:"participants,omitempty"`
+	Groups       int                      `json:"groups,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -290,7 +300,7 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 		_ = json.NewEncoder(conn).Encode(resp)
 		return
 	}
-	if req.Kind == chatStateKind || req.Kind == contactsSaveKind {
+	if req.Kind == chatStateKind || req.Kind == contactsSaveKind || req.Kind == groupsInfoKind || req.Kind == groupsInviteLinkKind || req.Kind == groupsParticipantsKind || req.Kind == groupsRefreshKind {
 		// The app-state coordinator owns these writes; recovery must not hold
 		// the message-send queue (#454).
 		if requestCtx.Err() != nil {
@@ -417,6 +427,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedMarkRead(ctx, a, req)
 	case contactsCheckKind:
 		return executeDelegatedContactsCheck(ctx, a.WA(), req)
+	case groupsInfoKind, groupsInviteLinkKind, groupsParticipantsKind, groupsRefreshKind:
+		return executeDelegatedGroupRead(ctx, a.DB(), a.WA(), req)
 	case chatStateKind:
 		return executeDelegatedChatState(ctx, a, req)
 	case contactsSaveKind:
@@ -424,6 +436,48 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 	default:
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
+}
+
+func executeDelegatedGroupRead(ctx context.Context, db *store.DB, client app.WAClient, req sendDelegateRequest) (sendDelegateResponse, error) {
+	resp := sendDelegateResponse{OK: true}
+	if req.Kind == groupsRefreshKind {
+		groups, err := client.GetJoinedGroups(ctx)
+		if err != nil {
+			return resp, err
+		}
+		joined := map[string]bool{}
+		for _, group := range groups {
+			if group == nil {
+				continue
+			}
+			joined[group.JID.String()] = true
+			_ = persistGroupInfo(ctx, db, client, group)
+			_ = db.UpsertChatMetadata(group.JID.String(), "group", group.GroupName.Name)
+		}
+		resp.Groups = len(groups)
+		return resp, db.MarkGroupsMissingFrom(joined, time.Now().UTC())
+	}
+	jid, err := parseGroupJID(req.To)
+	if err != nil {
+		return resp, err
+	}
+	switch req.Kind {
+	case groupsInfoKind:
+		resp.GroupInfo, err = client.GetGroupInfo(ctx, jid)
+		if err == nil && resp.GroupInfo == nil {
+			err = fmt.Errorf("group info is unavailable; check the group and retry")
+		}
+		if err == nil {
+			_ = persistGroupInfo(ctx, db, client, resp.GroupInfo)
+		}
+	case groupsInviteLinkKind:
+		resp.GroupLink, err = client.GetGroupInviteLink(ctx, jid, false)
+	case groupsParticipantsKind:
+		resp.Participants, err = db.ListGroupParticipants(jid.String())
+	default:
+		err = fmt.Errorf("unsupported group read %q", req.Kind)
+	}
+	return resp, err
 }
 
 type delegatedMarkReadApp interface {
