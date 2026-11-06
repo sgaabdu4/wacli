@@ -109,15 +109,15 @@ func TestLiveSyncWarnsAfterBusyRetriesRunOut(t *testing.T) {
 	var stored atomic.Int64
 	a.handleLiveSyncMessage(context.Background(), opts, evt, &stored, func(string, string) {}, nil)
 
-	if want := len(liveSaveRetryDelays) + 1; attempts != want {
-		t.Fatalf("attempts = %d, want %d", attempts, want)
+	if attempts != 4 {
+		t.Fatalf("attempts = %d, want 4", attempts)
 	}
 	if stored.Load() != 0 {
 		t.Fatalf("messages stored = %d, want 0", stored.Load())
 	}
 	warnings := warningEvents(t, eventLog)
-	if len(warnings) != attempts {
-		t.Fatalf("warnings = %d, want one per attempt (%d)", len(warnings), attempts)
+	if len(warnings) != 4 {
+		t.Fatalf("warnings = %d, want one per attempt (4)", len(warnings))
 	}
 	last := warnings[len(warnings)-1]
 	if last["code"] != "live_message_save_failed" || last["chat_jid"] != evt.Info.Chat.String() || last["msg_id"] != evt.Info.ID {
@@ -192,5 +192,17 @@ func TestLiveSyncWarnsWhenCancelledDuringRetryWait(t *testing.T) {
 	last := warnings[1]
 	if last["code"] != "live_message_save_failed" || last["chat_jid"] != evt.Info.Chat.String() || last["msg_id"] != evt.Info.ID || last["attempt"] != float64(1) {
 		t.Fatalf("final warning = %v", last)
+	}
+}
+
+func TestLiveSaveRetryDelaysAreShortAndBounded(t *testing.T) {
+	want := []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second}
+	if len(liveSaveRetryDelays) != len(want) {
+		t.Fatalf("delays = %v, want %v", liveSaveRetryDelays, want)
+	}
+	for i := range want {
+		if liveSaveRetryDelays[i] != want[i] {
+			t.Fatalf("delays = %v, want %v", liveSaveRetryDelays, want)
+		}
 	}
 }
