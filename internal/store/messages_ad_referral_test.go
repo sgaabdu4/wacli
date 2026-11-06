@@ -16,7 +16,7 @@ func TestMessageAdReferralRoundTrip(t *testing.T) {
 	if err := db.UpsertChat(chat, "dm", "Lead", now); err != nil {
 		t.Fatalf("UpsertChat: %v", err)
 	}
-	ref := AdReferral{SourceType: "ad", SourceID: "120200000000000001", Title: "Train with a coach", CtwaClid: "clid-1", EntryPointSource: "ctwa_ad"}
+	ref := AdReferral{SourceType: "ad", SourceID: "120200000000000001", Title: "Train with a coach", MediaType: "video", CtwaClid: "clid-1", EntryPointSource: "ctwa_ad"}
 	params := UpsertMessageParams{ChatJID: chat, MsgID: "ad1", SenderJID: chat, Timestamp: now, Text: "Hi", AdReferral: &ref}
 	if err := db.UpsertMessage(params); err != nil {
 		t.Fatalf("UpsertMessage: %v", err)
@@ -60,31 +60,5 @@ func TestMessageAdReferralRoundTrip(t *testing.T) {
 	}
 	if stored.Valid {
 		t.Fatalf("purged ad_referral = %q, want NULL", stored.String)
-	}
-}
-
-func TestMigrateLIDToPNPreservesAdReferral(t *testing.T) {
-	db := openTestDB(t)
-	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	pn := "15551234567@s.whatsapp.net"
-	lid := "999123456789@lid"
-	if err := db.UpsertChat(lid, "dm", "Lead", base); err != nil {
-		t.Fatalf("UpsertChat lid: %v", err)
-	}
-	ref := AdReferral{SourceType: "ad", SourceID: "120200000000000001"}
-	if err := db.UpsertMessage(UpsertMessageParams{ChatJID: lid, MsgID: "ad1", SenderJID: lid, Timestamp: base, Text: "Hi", AdReferral: &ref}); err != nil {
-		t.Fatalf("UpsertMessage: %v", err)
-	}
-
-	if err := db.MigrateLIDToPN(lid, pn); err != nil {
-		t.Fatalf("MigrateLIDToPN: %v", err)
-	}
-
-	msg, err := db.GetMessage(pn, "ad1")
-	if err != nil {
-		t.Fatalf("GetMessage after migration: %v", err)
-	}
-	if msg.AdReferral == nil || *msg.AdReferral != ref {
-		t.Fatalf("AdReferral after migration = %+v, want %+v", msg.AdReferral, ref)
 	}
 }

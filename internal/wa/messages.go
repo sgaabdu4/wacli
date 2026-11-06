@@ -92,7 +92,7 @@ type ParsedMessage struct {
 	ReactionEmoji    string
 	IsForwarded      bool
 	ForwardingScore  uint32
-	AdReferral       *AdReferral
+	AdReferral       *AdReferral `json:",omitempty"`
 	StarredKnown     bool
 	Starred          bool
 	Edited           bool

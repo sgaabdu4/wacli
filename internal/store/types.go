@@ -76,6 +76,7 @@ type AdReferral struct {
 	SourceApp        string `json:"source_app,omitempty"`
 	Title            string `json:"title,omitempty"`
 	Body             string `json:"body,omitempty"`
+	MediaType        string `json:"media_type,omitempty"`
 	CtwaClid         string `json:"ctwa_clid,omitempty"`
 	ConversionSource string `json:"conversion_source,omitempty"`
 	EntryPointSource string `json:"entry_point_source,omitempty"`
