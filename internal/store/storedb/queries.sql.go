@@ -466,7 +466,7 @@ func (q *Queries) GetMediaDownloadInfo(ctx context.Context, arg GetMediaDownload
 }
 
 const getMessage = `-- name: GetMessage :one
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
+SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), COALESCE(m.ad_referral,''), ''
 FROM messages m
 LEFT JOIN chats c ON c.jid = m.chat_jid
 LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
@@ -511,7 +511,8 @@ type GetMessageRow struct {
 	PayloadPurgedAt int64
 	Edited          int64
 	Buttons         string
-	Column33        string
+	AdReferral      string
+	Column34        string
 }
 
 func (q *Queries) GetMessage(ctx context.Context, arg GetMessageParams) (GetMessageRow, error) {
@@ -550,7 +551,8 @@ func (q *Queries) GetMessage(ctx context.Context, arg GetMessageParams) (GetMess
 		&i.PayloadPurgedAt,
 		&i.Edited,
 		&i.Buttons,
-		&i.Column33,
+		&i.AdReferral,
+		&i.Column34,
 	)
 	return i, err
 }
@@ -1279,7 +1281,7 @@ func (q *Queries) MarkMessageRevoked(ctx context.Context, arg MarkMessageRevoked
 }
 
 const messageContextAfter = `-- name: MessageContextAfter :many
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
+SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), COALESCE(m.ad_referral,''), ''
 FROM messages m
 LEFT JOIN chats c ON c.jid = m.chat_jid
 LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
@@ -1329,7 +1331,8 @@ type MessageContextAfterRow struct {
 	PayloadPurgedAt int64
 	Edited          int64
 	Buttons         string
-	Column33        string
+	AdReferral      string
+	Column34        string
 }
 
 func (q *Queries) MessageContextAfter(ctx context.Context, arg MessageContextAfterParams) ([]MessageContextAfterRow, error) {
@@ -1380,7 +1383,8 @@ func (q *Queries) MessageContextAfter(ctx context.Context, arg MessageContextAft
 			&i.PayloadPurgedAt,
 			&i.Edited,
 			&i.Buttons,
-			&i.Column33,
+			&i.AdReferral,
+			&i.Column34,
 		); err != nil {
 			return nil, err
 		}
@@ -1396,7 +1400,7 @@ func (q *Queries) MessageContextAfter(ctx context.Context, arg MessageContextAft
 }
 
 const messageContextBefore = `-- name: MessageContextBefore :many
-SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), ''
+SELECT m.rowid, m.chat_jid, COALESCE(c.name,''), m.msg_id, COALESCE(m.sender_jid,''), COALESCE(m.sender_name,''), m.ts, m.from_me, COALESCE(m.text,''), COALESCE(m.display_text,''), COALESCE(m.quoted_msg_id,''), COALESCE(m.quoted_sender_jid,''), m.is_forwarded, m.forwarding_score, COALESCE(m.reaction_to_id,''), COALESCE(m.reaction_emoji,''), COALESCE(m.media_type,''), COALESCE(m.media_caption,''), COALESCE(m.filename,''), COALESCE(m.mime_type,''), COALESCE(m.direct_path,''), COALESCE(m.local_path,''), COALESCE(m.downloaded_at,0), CASE WHEN s.msg_id IS NULL THEN 0 ELSE 1 END, COALESCE(s.starred_at,0), m.revoked, m.deleted_for_me, COALESCE(m.deleted_at,0), COALESCE(m.deletion_reason,''), COALESCE(m.payload_purged_at,0), m.edited, COALESCE(m.buttons,''), COALESCE(m.ad_referral,''), ''
 FROM messages m
 LEFT JOIN chats c ON c.jid = m.chat_jid
 LEFT JOIN starred s ON s.chat_jid = m.chat_jid AND s.msg_id = m.msg_id
@@ -1446,7 +1450,8 @@ type MessageContextBeforeRow struct {
 	PayloadPurgedAt int64
 	Edited          int64
 	Buttons         string
-	Column33        string
+	AdReferral      string
+	Column34        string
 }
 
 func (q *Queries) MessageContextBefore(ctx context.Context, arg MessageContextBeforeParams) ([]MessageContextBeforeRow, error) {
@@ -1497,7 +1502,8 @@ func (q *Queries) MessageContextBefore(ctx context.Context, arg MessageContextBe
 			&i.PayloadPurgedAt,
 			&i.Edited,
 			&i.Buttons,
-			&i.Column33,
+			&i.AdReferral,
+			&i.Column34,
 		); err != nil {
 			return nil, err
 		}
@@ -1945,7 +1951,7 @@ INSERT INTO messages(
     is_forwarded, forwarding_score, reaction_to_id, reaction_emoji,
     media_type, media_caption, filename, mime_type, direct_path,
     media_key, file_sha256, file_enc_sha256, file_length, revoked, deleted_for_me,
-    deleted_at, deletion_reason, edited, edited_ts, buttons
+    deleted_at, deletion_reason, edited, edited_ts, buttons, ad_referral
 ) SELECT
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
@@ -1954,7 +1960,7 @@ INSERT INTO messages(
     ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
     ?, ?, ?, ?,
-    ?, ?, ?
+    ?, ?, ?, ?
 WHERE NOT EXISTS (
     SELECT 1 FROM message_payload_purges p WHERE p.chat_jid = ? AND p.msg_id = ?
 )
@@ -1990,7 +1996,8 @@ ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
     deletion_reason=CASE WHEN messages.deleted_at IS NOT NULL THEN COALESCE(NULLIF(messages.deletion_reason,''), excluded.deletion_reason) ELSE excluded.deletion_reason END,
     edited=CASE WHEN messages.deleted_at IS NOT NULL THEN messages.edited WHEN excluded.deleted_at IS NOT NULL THEN 0 WHEN excluded.edited != 0 THEN 1 WHEN messages.edited != 0 THEN messages.edited ELSE 0 END,
     edited_ts=CASE WHEN messages.deleted_at IS NOT NULL THEN messages.edited_ts WHEN excluded.deleted_at IS NOT NULL THEN 0 WHEN excluded.edited != 0 AND (messages.edited = 0 OR excluded.edited_ts > messages.edited_ts) THEN excluded.edited_ts WHEN messages.edited != 0 THEN messages.edited_ts ELSE 0 END,
-    buttons=CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(messages.buttons, excluded.buttons) WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.buttons ELSE excluded.buttons END
+    buttons=CASE WHEN messages.deleted_at IS NOT NULL OR excluded.deleted_at IS NOT NULL THEN COALESCE(messages.buttons, excluded.buttons) WHEN (messages.edited != 0 AND excluded.edited = 0) OR (messages.edited != 0 AND excluded.edited != 0 AND excluded.edited_ts < messages.edited_ts) OR (messages.edited = 0 AND excluded.edited = 0 AND excluded.ts < messages.ts) THEN messages.buttons ELSE excluded.buttons END,
+    ad_referral=COALESCE(messages.ad_referral, excluded.ad_referral)
 WHERE messages.payload_purged_at IS NULL
 `
 
@@ -2026,6 +2033,7 @@ type UpsertMessageParams struct {
 	Edited          int64
 	EditedTs        int64
 	Buttons         sql.NullString
+	AdReferral      sql.NullString
 	ChatJid_2       string
 	MsgID_2         string
 }
@@ -2063,6 +2071,7 @@ func (q *Queries) UpsertMessage(ctx context.Context, arg UpsertMessageParams) er
 		arg.Edited,
 		arg.EditedTs,
 		arg.Buttons,
+		arg.AdReferral,
 		arg.ChatJid_2,
 		arg.MsgID_2,
 	)
