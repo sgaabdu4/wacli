@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mattn/go-sqlite3"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/appstate"
@@ -25,6 +26,8 @@ import (
 // session. sync deliberately keeps the local device record (see the LoggedOut
 // case), and `auth --phone` short-circuits while that record exists — so
 // re-pairing needs the explicit local logout first.
+var liveSaveRetryDelays = []time.Duration{100 * time.Millisecond, 500 * time.Millisecond, 2 * time.Second}
+
 const loggedOutRecoveryHint = "To re-authenticate, run `wacli auth logout` to clear the local session, then `wacli auth --phone` to pair again."
 
 func newMediaEnqueuer(ctx context.Context, queue *mediaQueue) func(chatJID, msgID string) {
@@ -655,7 +658,7 @@ func (a *App) handleLiveSyncMessage(ctx context.Context, opts SyncOptions, v *ev
 			}()
 		}
 	}
-	if err := a.storeParsedMessageForSync(ctx, pm, storeOptions, limits...); err == nil {
+	if err := a.storeLiveMessage(ctx, opts, pm, storeOptions, limits...); err == nil {
 		stored = true
 		if incrementUnread {
 			a.incrementLiveUnread(ctx, pm)
@@ -777,7 +780,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 					a.emitWarning(
 						"encrypted_edit_parse_failed",
 						fmt.Sprintf("warning: failed to parse encrypted edit %s: %v", pm.ID, err),
-						map[string]any{"message_id": pm.ID, "error": err.Error()},
+						map[string]any{"msg_id": pm.ID, "error": err.Error()},
 					)
 					continue
 				}
@@ -798,7 +801,7 @@ func (a *App) handleHistorySync(ctx context.Context, opts SyncOptions, v *events
 					a.emitWarning(
 						"encrypted_reaction_parse_failed",
 						fmt.Sprintf("warning: failed to parse encrypted reaction message %s: %v", pm.ID, err),
-						map[string]any{"message_id": pm.ID, "error": err.Error()},
+						map[string]any{"msg_id": pm.ID, "error": err.Error()},
 					)
 				} else {
 					a.decryptEncryptedReaction(ctx, &pm, evt)
@@ -929,6 +932,46 @@ func (a *App) emitSyncProgress(total int64) {
 	a.emitOrPrint("progress", map[string]any{"messages_synced": total}, "\rSynced %d messages...", total)
 }
 
+func isRetryableStoreError(err error) bool {
+	var sqliteErr sqlite3.Error
+	return errors.As(err, &sqliteErr) && (sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked)
+}
+
+// WhatsApp acknowledged the message before it reached the store, so a lost save is never resent.
+func (a *App) storeLiveMessage(ctx context.Context, opts SyncOptions, pm wa.ParsedMessage, options messageStoreOptions, limits ...*syncStorageLimits) error {
+	for attempt := 0; ; attempt++ {
+		var err error
+		if opts.failLiveStore != nil {
+			err = opts.failLiveStore(attempt)
+		}
+		if err == nil {
+			err = a.storeParsedMessageForSync(ctx, pm, options, limits...)
+		}
+		if err == nil {
+			return nil
+		}
+		final := attempt >= len(liveSaveRetryDelays) || !isRetryableStoreError(err) || ctx.Err() != nil
+		code := "live_message_save_retry"
+		if final {
+			code = "live_message_save_failed"
+		}
+		chat := canonicalJIDString(pm.Chat)
+		a.emitWarning(
+			code,
+			fmt.Sprintf("warning: failed to save message %s in %s (attempt %d): %v", pm.ID, chat, attempt+1, err),
+			map[string]any{"chat_jid": chat, "msg_id": pm.ID, "attempt": attempt + 1, "error": err.Error()},
+		)
+		if final {
+			return err
+		}
+		select {
+		case <-time.After(liveSaveRetryDelays[attempt]):
+		case <-ctx.Done():
+			return err
+		}
+	}
+}
+
 func (a *App) storeParsedMessageForSync(ctx context.Context, pm wa.ParsedMessage, options messageStoreOptions, limits ...*syncStorageLimits) error {
 	if len(limits) > 0 && limits[0] != nil {
 		return limits[0].StoreParsedMessage(ctx, pm, options)
@@ -942,7 +985,7 @@ func (a *App) decryptEncryptedReaction(ctx context.Context, pm *wa.ParsedMessage
 		a.emitWarning(
 			"encrypted_reaction_decrypt_failed",
 			fmt.Sprintf("warning: failed to decrypt reaction message %s: %v", pm.ID, err),
-			map[string]any{"message_id": pm.ID, "error": err.Error()},
+			map[string]any{"msg_id": pm.ID, "error": err.Error()},
 		)
 		return
 	}
