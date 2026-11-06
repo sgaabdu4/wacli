@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"io"
 	"net"
 	"os"
@@ -27,6 +29,7 @@ const (
 	groupsInviteLinkKind      = "groups_invite_link"
 	groupsParticipantsKind    = "groups_participants"
 	groupsRefreshKind         = "groups_refresh"
+	groupsMutateKind          = "groups_mutate"
 	// sendDelegateReplyMargin is reserved before the caller's deadline so a
 	// refusal can reach the caller before it gives up on the connection. An
 	// explicit "not sent" is only useful if it arrives.
@@ -36,55 +39,58 @@ const (
 var errSendDelegateUnavailable = errors.New("send delegate unavailable")
 
 type sendDelegateRequest struct {
-	Version              int      `json:"version"`
-	Kind                 string   `json:"kind"`
-	To                   string   `json:"to,omitempty"`
-	Pick                 int      `json:"pick,omitempty"`
-	Message              string   `json:"message,omitempty"`
-	Mentions             []string `json:"mentions,omitempty"`
-	ReplyTo              string   `json:"reply_to,omitempty"`
-	ReplyToSender        string   `json:"reply_to_sender,omitempty"`
-	NoPreview            bool     `json:"no_preview,omitempty"`
-	AllowSelf            bool     `json:"allow_self,omitempty"`
-	Ephemeral            bool     `json:"ephemeral,omitempty"`
-	EphemeralDuration    string   `json:"ephemeral_duration,omitempty"`
-	EphemeralDurationSet bool     `json:"ephemeral_duration_set,omitempty"`
-	File                 string   `json:"file,omitempty"`
-	Filename             string   `json:"filename,omitempty"`
-	Caption              string   `json:"caption,omitempty"`
-	MIME                 string   `json:"mime,omitempty"`
-	As                   string   `json:"as,omitempty"`
-	PTT                  bool     `json:"ptt,omitempty"`
-	MaxSizeBytes         int64    `json:"max_size_bytes,omitempty"`
-	ID                   string   `json:"id,omitempty"`
-	Reaction             string   `json:"reaction,omitempty"`
-	Sender               string   `json:"sender,omitempty"`
-	Label                string   `json:"label,omitempty"`
-	ButtonID             string   `json:"button_id,omitempty"`
-	SelectIndex          int      `json:"select_index,omitempty"`
-	Type                 string   `json:"type,omitempty"`
-	Latitude             float64  `json:"latitude,omitempty"`
-	Longitude            float64  `json:"longitude,omitempty"`
-	Name                 string   `json:"name,omitempty"`
-	Question             string   `json:"question,omitempty"`
-	Options              []string `json:"options,omitempty"`
-	Selectable           int      `json:"selectable,omitempty"`
-	PresenceState        string   `json:"presence_state,omitempty"`
-	PresenceMedia        string   `json:"presence_media,omitempty"`
-	PresenceWaitMS       int64    `json:"presence_wait_ms,omitempty"`
-	Read                 *bool    `json:"read,omitempty"`
-	Receipts             bool     `json:"receipts,omitempty"`
-	ThroughMessageID     string   `json:"through_message_id,omitempty"`
-	Phones               []string `json:"phones,omitempty"`
-	FirstName            string   `json:"first_name,omitempty"`
-	AccountWide          bool     `json:"account_wide,omitempty"`
-	Phonebook            bool     `json:"phonebook,omitempty"`
-	ChatStateAction      string   `json:"chat_state_action,omitempty"`
-	MuteDurationMS       int64    `json:"mute_duration_ms,omitempty"`
-	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
-	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
-	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
-	RetryOnPhone         bool     `json:"retry_on_phone,omitempty"`
+	Version              int                    `json:"version"`
+	Kind                 string                 `json:"kind"`
+	GroupAction          string                 `json:"group_action,omitempty"`
+	GroupCreate          *wa.CreateGroupRequest `json:"group_create,omitempty"`
+	GroupPhoto           []byte                 `json:"group_photo,omitempty"`
+	To                   string                 `json:"to,omitempty"`
+	Pick                 int                    `json:"pick,omitempty"`
+	Message              string                 `json:"message,omitempty"`
+	Mentions             []string               `json:"mentions,omitempty"`
+	ReplyTo              string                 `json:"reply_to,omitempty"`
+	ReplyToSender        string                 `json:"reply_to_sender,omitempty"`
+	NoPreview            bool                   `json:"no_preview,omitempty"`
+	AllowSelf            bool                   `json:"allow_self,omitempty"`
+	Ephemeral            bool                   `json:"ephemeral,omitempty"`
+	EphemeralDuration    string                 `json:"ephemeral_duration,omitempty"`
+	EphemeralDurationSet bool                   `json:"ephemeral_duration_set,omitempty"`
+	File                 string                 `json:"file,omitempty"`
+	Filename             string                 `json:"filename,omitempty"`
+	Caption              string                 `json:"caption,omitempty"`
+	MIME                 string                 `json:"mime,omitempty"`
+	As                   string                 `json:"as,omitempty"`
+	PTT                  bool                   `json:"ptt,omitempty"`
+	MaxSizeBytes         int64                  `json:"max_size_bytes,omitempty"`
+	ID                   string                 `json:"id,omitempty"`
+	Reaction             string                 `json:"reaction,omitempty"`
+	Sender               string                 `json:"sender,omitempty"`
+	Label                string                 `json:"label,omitempty"`
+	ButtonID             string                 `json:"button_id,omitempty"`
+	SelectIndex          int                    `json:"select_index,omitempty"`
+	Type                 string                 `json:"type,omitempty"`
+	Latitude             float64                `json:"latitude,omitempty"`
+	Longitude            float64                `json:"longitude,omitempty"`
+	Name                 string                 `json:"name,omitempty"`
+	Question             string                 `json:"question,omitempty"`
+	Options              []string               `json:"options,omitempty"`
+	Selectable           int                    `json:"selectable,omitempty"`
+	PresenceState        string                 `json:"presence_state,omitempty"`
+	PresenceMedia        string                 `json:"presence_media,omitempty"`
+	PresenceWaitMS       int64                  `json:"presence_wait_ms,omitempty"`
+	Read                 *bool                  `json:"read,omitempty"`
+	Receipts             bool                   `json:"receipts,omitempty"`
+	ThroughMessageID     string                 `json:"through_message_id,omitempty"`
+	Phones               []string               `json:"phones,omitempty"`
+	FirstName            string                 `json:"first_name,omitempty"`
+	AccountWide          bool                   `json:"account_wide,omitempty"`
+	Phonebook            bool                   `json:"phonebook,omitempty"`
+	ChatStateAction      string                 `json:"chat_state_action,omitempty"`
+	MuteDurationMS       int64                  `json:"mute_duration_ms,omitempty"`
+	PostSendWaitMS       int64                  `json:"post_send_wait_ms,omitempty"`
+	TimeoutMS            int64                  `json:"timeout_ms,omitempty"`
+	DeadlineUnixMS       int64                  `json:"deadline_unix_ms,omitempty"`
+	RetryOnPhone         bool                   `json:"retry_on_phone,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -116,6 +122,8 @@ type sendDelegateResponse struct {
 	GroupLink    string                   `json:"group_link,omitempty"`
 	Participants []store.GroupParticipant `json:"participants,omitempty"`
 	Groups       int                      `json:"groups,omitempty"`
+	Updated      []types.GroupParticipant `json:"updated,omitempty"`
+	PictureID    string                   `json:"picture_id,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -442,6 +450,8 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		return executeDelegatedContactsCheck(ctx, a.WA(), req)
 	case groupsInfoKind, groupsInviteLinkKind, groupsParticipantsKind, groupsRefreshKind:
 		return executeDelegatedGroupRead(ctx, a.DB(), a.WA(), req)
+	case groupsMutateKind:
+		return executeDelegatedGroupMutation(ctx, a.DB(), a.WA(), req)
 	case chatStateKind:
 		return executeDelegatedChatState(ctx, a, req)
 	case contactsSaveKind:
@@ -491,6 +501,69 @@ func executeDelegatedGroupRead(ctx context.Context, db *store.DB, client app.WAC
 		err = fmt.Errorf("unsupported group read %q", req.Kind)
 	}
 	return resp, err
+}
+
+func executeDelegatedGroupMutation(ctx context.Context, db *store.DB, client app.WAClient, req sendDelegateRequest) (sendDelegateResponse, error) {
+	resp := sendDelegateResponse{OK: true}
+	if req.GroupAction == "create" {
+		if req.GroupCreate == nil || strings.TrimSpace(req.GroupCreate.Name) == "" {
+			return resp, fmt.Errorf("group creation needs a name")
+		}
+		info, err := client.CreateGroup(ctx, *req.GroupCreate)
+		if err == nil && info != nil {
+			_ = persistGroupInfo(ctx, db, client, info)
+		}
+		resp.GroupInfo = info
+		return resp, err
+	}
+	jid, err := parseGroupJID(req.To)
+	if err != nil {
+		return resp, err
+	}
+	switch req.GroupAction {
+	case "rename":
+		if strings.TrimSpace(req.Name) == "" {
+			return resp, fmt.Errorf("group rename needs a name")
+		}
+		err = client.SetGroupName(ctx, jid, req.Name)
+	case "picture":
+		if _, decodeErr := jpeg.DecodeConfig(bytes.NewReader(req.GroupPhoto)); decodeErr != nil {
+			return resp, fmt.Errorf("picture must be JPEG: %w", decodeErr)
+		}
+		resp.PictureID, err = client.SetGroupPhoto(ctx, jid, req.GroupPhoto)
+	case "leave":
+		err = client.LeaveGroup(ctx, jid)
+		if err == nil {
+			_ = db.MarkGroupLeft(jid.String(), time.Now().UTC())
+		}
+		return resp, err
+	case "add", "remove", "promote", "demote":
+		users, parseErr := parseGroupUserJIDs(req.Phones)
+		if parseErr != nil {
+			return resp, parseErr
+		}
+		if len(users) == 0 {
+			return resp, fmt.Errorf("group membership needs at least one user")
+		}
+		resp.Updated, err = client.UpdateGroupParticipants(ctx, jid, users, wa.GroupParticipantAction(req.GroupAction))
+	default:
+		return resp, fmt.Errorf("unsupported group mutation %q", req.GroupAction)
+	}
+	if err == nil {
+		if info, infoErr := client.GetGroupInfo(ctx, jid); infoErr == nil && info != nil {
+			_ = persistGroupInfo(ctx, db, client, info)
+		}
+	}
+	return resp, err
+}
+
+func delegateGroupMutation(ctx context.Context, flags *rootFlags, req sendDelegateRequest) (sendDelegateResponse, error) {
+	req.Kind = groupsMutateKind
+	resp, err := delegateSend(ctx, flags, req)
+	if err != nil {
+		return resp, fmt.Errorf("group write needs a running sync to save incoming messages; start `wacli sync` and retry: %w", err)
+	}
+	return resp, nil
 }
 
 type delegatedMarkReadApp interface {

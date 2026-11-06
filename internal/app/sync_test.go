@@ -66,6 +66,55 @@ func TestSyncSavesIncomingMessageDuringConnectedGroupRead(t *testing.T) {
 	}
 }
 
+func TestSyncSavesIncomingMessageDuringGroupWrites(t *testing.T) {
+	for _, action := range []string{"rename", "picture", "create", "leave", "add", "remove", "promote", "demote"} {
+		t.Run(action, func(t *testing.T) {
+			a := newTestApp(t)
+			f := newFakeWA()
+			a.wa = f
+			group := types.NewJID("support", types.GroupServer)
+			chat := types.NewJID("member", types.DefaultUserServer)
+			f.onGroupWrite = func() {
+				f.emit(&events.Message{
+					Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat}, ID: "during-group-write", Timestamp: time.Now()},
+					Message: &waProto.Message{Conversation: proto.String("synthetic")},
+				})
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err := a.Sync(ctx, SyncOptions{Mode: SyncModeOnce, IdleExit: time.Millisecond, AfterConnect: func(ctx context.Context) error {
+				switch action {
+				case "rename":
+					return a.WA().SetGroupName(ctx, group, "Support")
+				case "picture":
+					_, err := a.WA().SetGroupPhoto(ctx, group, []byte("synthetic"))
+					return err
+				case "create":
+					_, err := a.WA().CreateGroup(ctx, wa.CreateGroupRequest{Name: "Support"})
+					return err
+				case "leave":
+					return a.WA().LeaveGroup(ctx, group)
+				default:
+					_, err := a.WA().UpdateGroupParticipants(ctx, group, []types.JID{chat}, wa.GroupParticipantAction(action))
+					return err
+				}
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			message, err := a.DB().GetMessage(chat.String(), "during-group-write")
+			if err != nil || message.FromMe {
+				t.Fatal("incoming message was not saved during group write")
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.connectCalls != 1 {
+				t.Fatal("group write reconnected sync")
+			}
+		})
+	}
+}
+
 func TestLiveSyncWarnsOnEncryptedReactionDecryptFailure(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()

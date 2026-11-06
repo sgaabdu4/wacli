@@ -38,19 +38,6 @@ func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
 			participants, err := parseGroupUserJIDs(users)
 			if err != nil {
 				return err
@@ -62,21 +49,14 @@ func newGroupsCreateCmd(flags *rootFlags) *cobra.Command {
 					return fmt.Errorf("parse --linked-parent: %w", err)
 				}
 			}
-			info, err := a.WA().CreateGroup(ctx, wa.CreateGroupRequest{
-				Name:                   name,
-				Participants:           participants,
-				IsAnnounce:             announceOnly,
-				IsLocked:               locked,
-				IsJoinApprovalRequired: joinApproval,
-				IsParent:               parent,
-				LinkedParentJID:        parentJID,
-			})
+			resp, err := delegateGroupMutation(ctx, flags, sendDelegateRequest{GroupAction: "create", GroupCreate: &wa.CreateGroupRequest{
+				Name: name, Participants: participants, IsAnnounce: announceOnly,
+				IsLocked: locked, IsJoinApprovalRequired: joinApproval, IsParent: parent, LinkedParentJID: parentJID,
+			}})
 			if err != nil {
 				return err
 			}
-			if info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
+			info := resp.GroupInfo
 
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, info)

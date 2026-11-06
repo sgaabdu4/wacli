@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"github.com/openclaw/wacli/internal/app"
 	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/store"
+	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -75,6 +79,169 @@ func TestLiveGroupReadsWithoutSyncNeverOpenAnotherSession(t *testing.T) {
 				t.Error("read opened a standalone WhatsApp session")
 			}
 		})
+	}
+}
+
+func TestGroupWritesDelegateWhileSyncOwnsStore(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	for _, args := range [][]string{
+		{"rename", "--jid", "support@g.us", "--name", "Renamed"},
+		{"leave", "--jid", "support@g.us"},
+		{"create", "--name", "Support", "--user", "member@s.whatsapp.net"},
+		{"participants", "add", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"},
+		{"participants", "remove", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"},
+		{"participants", "promote", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"},
+		{"participants", "demote", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"},
+	} {
+		t.Run(strings.Join(args[:2], "-"), func(t *testing.T) {
+			storeDir := shortPresenceDelegateStoreDir(t)
+			lk, err := lock.Acquire(storeDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lk.Release()
+			called := make(chan sendDelegateRequest, 1)
+			stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(_ context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+				called <- req
+				return sendDelegateResponse{}, fmt.Errorf("group write reached saving sync")
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stop()
+			command := append([]string{"--store", storeDir, "--json", "--timeout", "750ms", "groups"}, args...)
+			_, _, _ = runPresenceDelegateHelper(t, command)
+			select {
+			case req := <-called:
+				if req.Kind != "groups_mutate" {
+					t.Fatalf("kind = %s", req.Kind)
+				}
+			default:
+				t.Fatal("group write opened a standalone connection instead of saving sync")
+			}
+		})
+	}
+}
+
+type groupWriteWA struct {
+	groupReadWA
+	action string
+}
+
+func (f *groupWriteWA) SetGroupName(_ context.Context, jid types.JID, name string) error {
+	if jid != f.info.JID || name != "Renamed" {
+		return fmt.Errorf("rename arguments lost")
+	}
+	f.action = "rename"
+	f.info.GroupName.Name = name
+	return f.err
+}
+func (f *groupWriteWA) SetGroupPhoto(_ context.Context, jid types.JID, photo []byte) (string, error) {
+	if jid != f.info.JID {
+		return "", fmt.Errorf("picture target lost")
+	}
+	if _, err := jpeg.DecodeConfig(bytes.NewReader(photo)); err != nil {
+		return "", err
+	}
+	f.action = "picture"
+	return "picture-id", f.err
+}
+func (f *groupWriteWA) CreateGroup(_ context.Context, req wa.CreateGroupRequest) (*types.GroupInfo, error) {
+	if req.Name != "Support" || len(req.Participants) != 1 || req.Participants[0].User != "member" || !req.IsAnnounce || !req.IsLocked || !req.IsJoinApprovalRequired || req.LinkedParentJID.User != "community" {
+		return nil, fmt.Errorf("create arguments lost")
+	}
+	f.action = "create"
+	return f.info, f.err
+}
+func (f *groupWriteWA) LeaveGroup(_ context.Context, jid types.JID) error {
+	if jid != f.info.JID {
+		return fmt.Errorf("leave target lost")
+	}
+	f.action = "leave"
+	return f.err
+}
+func (f *groupWriteWA) UpdateGroupParticipants(_ context.Context, jid types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error) {
+	if jid != f.info.JID || len(users) != 1 || users[0].User != "member" {
+		return nil, fmt.Errorf("membership arguments lost")
+	}
+	f.action = string(action)
+	return []types.GroupParticipant{{JID: users[0], Error: 429}}, f.err
+}
+
+func TestGroupWriteResultsUseSavingSocketAndPreserveErrors(t *testing.T) {
+	skipPresenceDelegateSocketTestOnUnsupportedOS(t)
+	storeDir := shortPresenceDelegateStoreDir(t)
+	lk, err := lock.Acquire(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lk.Release()
+	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	fake := &groupWriteWA{groupReadWA: groupReadWA{info: &types.GroupInfo{JID: types.NewJID("support", types.GroupServer)}}}
+	stop, err := startSendDelegateServerForStore(context.Background(), storeDir, sendSpacing{}, func(ctx context.Context, req sendDelegateRequest) (sendDelegateResponse, error) {
+		return executeDelegatedGroupMutation(ctx, db, fake, req)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	var photo bytes.Buffer
+	if err := jpeg.Encode(&photo, image.NewRGBA(image.Rect(0, 0, 1, 1)), nil); err != nil {
+		t.Fatal(err)
+	}
+	photoPath := filepath.Join(storeDir, "picture.jpg")
+	if err := os.WriteFile(photoPath, photo.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		action string
+		args   []string
+		want   string
+	}{
+		{"rename", []string{"rename", "--jid", "support@g.us", "--name", "Renamed"}, `"name":"Renamed"`},
+		{"picture", []string{"set-picture", "support@g.us", photoPath}, `"picture_id":"picture-id"`},
+		{"create", []string{"create", "--name", "Support", "--user", "member@s.whatsapp.net", "--announce-only", "--locked", "--join-approval", "--linked-parent", "community@g.us"}, `"JID":"support@g.us"`},
+		{"add", []string{"participants", "add", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"}, `"Error":429`},
+		{"remove", []string{"participants", "remove", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"}, `"Error":429`},
+		{"promote", []string{"participants", "promote", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"}, `"Error":429`},
+		{"demote", []string{"participants", "demote", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"}, `"Error":429`},
+		{"leave", []string{"leave", "--jid", "support@g.us"}, `"left":true`},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			args := append([]string{"--store", storeDir, "--json", "--timeout", "750ms", "groups"}, tc.args...)
+			stdout, stderr, err := runPresenceDelegateHelper(t, args)
+			if err != nil || fake.action != tc.action || !strings.Contains(stdout, tc.want) {
+				t.Fatalf("write result lost: %s %s %v", stdout, stderr, err)
+			}
+			fake.err = fmt.Errorf("not participating in that group")
+			_, stderr, err = runPresenceDelegateHelper(t, args)
+			if err == nil || !strings.Contains(stderr, fake.err.Error()) {
+				t.Fatal("write error was not preserved")
+			}
+			fake.err = nil
+		})
+	}
+}
+
+func TestGroupWritesWithoutSyncNeverOpenAnotherSession(t *testing.T) {
+	for _, args := range [][]string{
+		{"rename", "--jid", "support@g.us", "--name", "Support"},
+		{"create", "--name", "Support"},
+		{"leave", "--jid", "support@g.us"},
+		{"participants", "add", "--jid", "support@g.us", "--user", "member@s.whatsapp.net"},
+	} {
+		storeDir := shortPresenceDelegateStoreDir(t)
+		_, stderr, err := runPresenceDelegateHelper(t, append([]string{"--store", storeDir, "--json", "groups"}, args...))
+		if err == nil || !strings.Contains(stderr, "running sync") {
+			t.Error("write must report missing saving sync")
+		}
+		if _, err := os.Stat(filepath.Join(storeDir, "session.db")); !os.IsNotExist(err) {
+			t.Error("write opened a standalone WhatsApp session")
+		}
 	}
 }
 
