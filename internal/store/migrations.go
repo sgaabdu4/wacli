@@ -777,13 +777,38 @@ func migrateMessagesAdReferralColumn(d *DB) error {
 	if err != nil {
 		return err
 	}
-	if has {
+	if !has {
+		if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN ad_referral TEXT`); err != nil {
+			return fmt.Errorf("add messages.ad_referral column: %w", err)
+		}
+	}
+	return refreshMessageChangeTriggers(d, "ad_referral")
+}
+
+// The update trigger compares the columns that existed when migration 31 built
+// it. Rebuild it when a later column is missing from the comparison, leaving
+// the journal, archive identity and checkpoints alone.
+func refreshMessageChangeTriggers(d *DB, column string) error {
+	var triggerSQL sql.NullString
+	err := d.sql.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='retrieval_messages_update'`).Scan(&triggerSQL)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
-	if _, err := d.sql.Exec(`ALTER TABLE messages ADD COLUMN ad_referral TEXT`); err != nil {
-		return fmt.Errorf("add messages.ad_referral column: %w", err)
+	if err != nil {
+		return fmt.Errorf("inspect message change triggers: %w", err)
 	}
-	return nil
+	if strings.Contains(triggerSQL.String, "old."+column+" IS NOT new."+column) {
+		return nil
+	}
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := createMessageChangeTriggers(tx); err != nil {
+		return fmt.Errorf("rebuild message change triggers: %w", err)
+	}
+	return tx.Commit()
 }
 
 func migrateMessagesEditedColumns(d *DB) error {
