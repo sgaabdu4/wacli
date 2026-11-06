@@ -307,3 +307,37 @@ func TestStoreErrorMatchingUsesTheDriverCodes(t *testing.T) {
 		t.Fatal("an error with only the lock text was treated as retryable")
 	}
 }
+
+func TestLiveSyncStartsNoSaveAfterCancellationWhenTheRetryTimerIsAlsoReady(t *testing.T) {
+	a, evt, _ := newSaveRetryApp(t)
+	liveSaveRetryDelays = []time.Duration{0}
+	for i := 0; i < 64; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		log := &cancelOnRetryWriter{cancel: cancel}
+		a.opts.Events = out.NewEventWriter(log, true)
+		pm := wa.ParseLiveMessage(evt)
+		pm.ID = fmt.Sprintf("cancel-boundary-%d", i)
+		attempts := 0
+		opts := SyncOptions{failLiveStore: func(attempt int) error {
+			attempts++
+			if attempt == 0 {
+				return sqlite3.Error{Code: sqlite3.ErrBusy}
+			}
+			return nil
+		}}
+
+		err := a.storeLiveMessage(ctx, opts, pm, messageStoreOptions{})
+		cancel()
+
+		if err == nil || attempts != 1 {
+			t.Fatalf("round %d: err = %v, attempts = %d, want a failure after exactly one attempt", i, err, attempts)
+		}
+		if _, readErr := a.db.GetMessage(pm.Chat.String(), pm.ID); readErr == nil {
+			t.Fatalf("round %d: a save started after cancellation wrote the message", i)
+		}
+		warnings := warningEvents(t, &log.Buffer)
+		if len(warnings) != 2 || warnings[0]["code"] != "live_message_save_retry" || warnings[1]["code"] != "live_message_save_failed" || warnings[1]["attempt"] != float64(1) {
+			t.Fatalf("round %d: warnings = %v, want one retry then one final failure for attempt 1", i, warnings)
+		}
+	}
+}

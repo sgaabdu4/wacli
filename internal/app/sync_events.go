@@ -966,6 +966,8 @@ func (a *App) storeLiveMessage(ctx context.Context, opts SyncOptions, pm wa.Pars
 		select {
 		case <-time.After(liveSaveRetryDelays[attempt]):
 		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
 			warn("live_message_save_failed")
 			return err
 		}
