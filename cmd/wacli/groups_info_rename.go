@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image/jpeg"
 	"os"
 	"strings"
 	"time"
@@ -11,6 +13,52 @@ import (
 	"github.com/spf13/cobra"
 	"go.mau.fi/whatsmeow/types"
 )
+
+func newGroupsSetPictureCmd(flags *rootFlags) *cobra.Command {
+	return &cobra.Command{
+		Use:   "set-picture <jid> <jpeg path>",
+		Short: "Set a group picture from a JPEG file",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := flags.requireWritable(); err != nil {
+				return err
+			}
+			jid, err := parseGroupJID(args[0])
+			if err != nil {
+				return err
+			}
+			photo, err := os.ReadFile(args[1])
+			if err != nil {
+				return fmt.Errorf("read picture: %w", err)
+			}
+			if _, err := jpeg.DecodeConfig(bytes.NewReader(photo)); err != nil {
+				return fmt.Errorf("picture must be JPEG: %w", err)
+			}
+			ctx, cancel := withTimeout(context.Background(), flags)
+			defer cancel()
+			a, lock, err := newApp(ctx, flags, true, false)
+			if err != nil {
+				return err
+			}
+			defer closeApp(a, lock)
+			if err := a.EnsureAuthed(ctx); err != nil {
+				return err
+			}
+			if err := a.Connect(ctx, false, nil); err != nil {
+				return err
+			}
+			id, err := a.WA().SetGroupPhoto(ctx, jid, photo)
+			if err != nil {
+				return err
+			}
+			if flags.asJSON {
+				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid.String(), "picture_id": id})
+			}
+			fmt.Fprintln(os.Stdout, "OK")
+			return nil
+		},
+	}
+}
 
 func newGroupsInfoCmd(flags *rootFlags) *cobra.Command {
 	var jidStr string

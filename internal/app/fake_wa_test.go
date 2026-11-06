@@ -475,6 +475,10 @@ func (f *fakeWA) CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*t
 	return g, nil
 }
 
+func (f *fakeWA) SetGroupPhoto(ctx context.Context, jid types.JID, photo []byte) (string, error) {
+	return "picture-id", nil
+}
+
 func (f *fakeWA) SetGroupName(ctx context.Context, jid types.JID, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
