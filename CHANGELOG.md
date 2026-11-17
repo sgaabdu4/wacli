@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CLI: add the root flag `--values-stdin` to pass every flag value and positional as one JSON object on stdin.
+
 ## 0.26.0 - 2026-11-05
 
 **Highlights:** fresh own replies mark chats read, broadcast sync avoids long stalls, business attachments and M4A audio arrive intact, and networking security fixes.
