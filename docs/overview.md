@@ -17,7 +17,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - Use `--full` to avoid table truncation.
 - Write commands acquire the store lock; use `--lock-wait DURATION` to wait.
 - Use `--read-only` or `WACLI_READONLY=1` to reject commands that write WhatsApp or local state.
-- Use `--values-stdin` to pass flag values and positionals as one JSON object on stdin, `{"flags":{"to":"+15550000000","mention":["+15550000001"]},"args":["value"]}`, so they stay off the command line. Put only literal command words on the command line. Flag names must belong to the command, values are never read as options, and `store`, `account` and `values-stdin` are refused. Stdin is closed to prompts afterwards, so pass `--confirm` or `--json` where a prompt would appear.
+- Use `--values-stdin` to pass flag values and positionals as one JSON object on stdin, `{"flags":{"to":"+15550000000","mention":["+15550000001"]},"args":["value"]}`, so they stay off the command line. Put only literal command words on the command line. Flag names must belong to the command, values are never read as options, and `store`, `account` and `values-stdin` are refused. Stdin is empty to prompts afterwards, so a prompt cannot read an answer. Pass `--confirm` to `messages purge`, and `--json` or `--pick` to avoid the recipient prompt.
 - Use `WACLI_MEDIA_ROOTS` to confine which local files send commands may upload (see [send](send.md#files)).
 - Use `sync --max-messages`, `sync --max-db-size`, `WACLI_SYNC_MAX_MESSAGES`, or `WACLI_SYNC_MAX_DB_SIZE` to bound local history growth.
 - Use `store cleanup`, `chats cleanup`, and `groups prune` to preview and remove stale local rows after sync has already stored them.
