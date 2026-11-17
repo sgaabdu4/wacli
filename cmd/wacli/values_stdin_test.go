@@ -36,10 +36,12 @@ func TestValuesStdinRefusesUnknownFlagName(t *testing.T) {
 }
 
 func TestValuesStdinRefusesStoreAccountAndItself(t *testing.T) {
-	for _, name := range []string{"store", "account", "values-stdin"} {
-		_, _, err := runWithStdin(t, `{"flags":{"`+name+`":"x"}}`, "--values-stdin", "messages", "show")
-		if err == nil || !strings.Contains(err.Error(), name) {
-			t.Fatalf("flag %s: want refusal, got %v", name, err)
+	values := map[string]string{"store": `"x"`, "account": `"x"`, "values-stdin": `true`}
+	for name, value := range values {
+		_, _, err := runWithStdin(t, `{"flags":{"`+name+`":`+value+`}}`, "--values-stdin", "messages", "show")
+		want := `flag "` + name + `" cannot be set from stdin`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("flag %s: want %q, got %v", name, want, err)
 		}
 	}
 }
