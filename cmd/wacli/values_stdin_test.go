@@ -127,3 +127,18 @@ func TestValuesStdinErrorsFollowJSONAndEventsFlags(t *testing.T) {
 		t.Fatalf("plain error expected without --json, got %q", stderr)
 	}
 }
+
+func TestValuesStdinReplacesStdinWithNullDevice(t *testing.T) {
+	runWithStdin(t, `{}`, "--values-stdin", "--json", "contacts", "search", "x")
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	null, err := os.Stat(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(info, null) {
+		t.Fatalf("stdin must be the null device after the values are read, got %s", os.Stdin.Name())
+	}
+}
