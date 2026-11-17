@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,5 +99,29 @@ func TestValuesStdinLeavesNoStdinForPrompts(t *testing.T) {
 	n, _ := os.Stdin.Read(buf)
 	if n != 0 || isInteractive() {
 		t.Fatalf("stdin must be exhausted and non-interactive after the values are read")
+	}
+}
+
+func TestValuesStdinErrorsFollowJSONAndEventsFlags(t *testing.T) {
+	bad := `{"flags":{"limit":"abc"}}`
+	_, stderr, err := runWithStdin(t, bad, "--json", "--values-stdin", "messages", "list")
+	if err == nil {
+		t.Fatal("want an error for a bad limit")
+	}
+	var env map[string]any
+	if jerr := json.Unmarshal([]byte(strings.TrimSpace(stderr)), &env); jerr != nil || env["success"] != false {
+		t.Fatalf("--json error must be a JSON envelope, got %q (%v)", stderr, jerr)
+	}
+	_, stderr, err = runWithStdin(t, bad, "--events", "--values-stdin", "messages", "list")
+	if err == nil {
+		t.Fatal("want an error for a bad limit")
+	}
+	var ev map[string]any
+	if jerr := json.Unmarshal([]byte(strings.TrimSpace(stderr)), &ev); jerr != nil || ev["event"] != "error" {
+		t.Fatalf("--events error must be an NDJSON error event, got %q (%v)", stderr, jerr)
+	}
+	_, stderr, _ = runWithStdin(t, bad, "--values-stdin", "messages", "list")
+	if strings.HasPrefix(strings.TrimSpace(stderr), "{") {
+		t.Fatalf("plain error expected without --json, got %q", stderr)
 	}
 }

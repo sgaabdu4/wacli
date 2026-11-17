@@ -107,7 +107,11 @@ func execute(args []string) error {
 	if valuesStdinRequested(args) {
 		stdinArgs, err := loadStdinValues(rootCmd, args)
 		if err != nil {
-			writeRootError(flags, err)
+			var literal rootFlags
+			if c, rest, ferr := newRootCmd(&literal).Find(args); ferr == nil {
+				_ = c.ParseFlags(rest)
+			}
+			writeRootError(literal, err)
 			return err
 		}
 		args = stdinArgs
