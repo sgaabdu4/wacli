@@ -52,9 +52,7 @@ type rootFlags struct {
 	lockWait   time.Duration
 }
 
-func execute(args []string) error {
-	var flags rootFlags
-
+func newRootCmd(flags *rootFlags) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:           "wacli",
 		Short:         "WhatsApp CLI: sync, search, send",
@@ -75,29 +73,49 @@ func execute(args []string) error {
 	rootCmd.PersistentFlags().BoolVar(&flags.events, "events", false, "emit machine-readable NDJSON lifecycle events on stderr")
 	rootCmd.PersistentFlags().DurationVar(&flags.timeout, "timeout", 5*time.Minute, "command timeout (non-sync commands)")
 	rootCmd.PersistentFlags().DurationVar(&flags.lockWait, "lock-wait", 0, "wait for the store lock before failing (write commands)")
+	rootCmd.PersistentFlags().Bool(valuesStdinFlag, false, "read flag values and positionals as one JSON object from stdin: {\"flags\":{...},\"args\":[...]}")
 	rootCmd.PersistentFlags().BoolVar(&flags.readOnly, "read-only", false, "reject commands that intentionally write WhatsApp or the local store (or set WACLI_READONLY=1)")
 
 	rootCmd.AddCommand(newVersionCmd())
-	rootCmd.AddCommand(newAccountsCmd(&flags))
-	rootCmd.AddCommand(newDoctorCmd(&flags))
-	rootCmd.AddCommand(newAuthCmd(&flags))
-	rootCmd.AddCommand(newSyncCmd(&flags))
-	rootCmd.AddCommand(newMessagesCmd(&flags))
-	rootCmd.AddCommand(newCallsCmd(&flags))
-	rootCmd.AddCommand(newSendCmd(&flags))
-	rootCmd.AddCommand(newPollCmd(&flags))
-	rootCmd.AddCommand(newPollsCmd(&flags))
-	rootCmd.AddCommand(newMediaCmd(&flags))
-	rootCmd.AddCommand(newContactsCmd(&flags))
-	rootCmd.AddCommand(newChatsCmd(&flags))
-	rootCmd.AddCommand(newGroupsCmd(&flags))
-	rootCmd.AddCommand(newChannelsCmd(&flags))
-	rootCmd.AddCommand(newHistoryCmd(&flags))
-	rootCmd.AddCommand(newPresenceCmd(&flags))
-	rootCmd.AddCommand(newProfileCmd(&flags))
-	rootCmd.AddCommand(newDocsCmd(&flags))
-	rootCmd.AddCommand(newStoreCmd(&flags))
+	rootCmd.AddCommand(newAccountsCmd(flags))
+	rootCmd.AddCommand(newDoctorCmd(flags))
+	rootCmd.AddCommand(newAuthCmd(flags))
+	rootCmd.AddCommand(newSyncCmd(flags))
+	rootCmd.AddCommand(newMessagesCmd(flags))
+	rootCmd.AddCommand(newCallsCmd(flags))
+	rootCmd.AddCommand(newSendCmd(flags))
+	rootCmd.AddCommand(newPollCmd(flags))
+	rootCmd.AddCommand(newPollsCmd(flags))
+	rootCmd.AddCommand(newMediaCmd(flags))
+	rootCmd.AddCommand(newContactsCmd(flags))
+	rootCmd.AddCommand(newChatsCmd(flags))
+	rootCmd.AddCommand(newGroupsCmd(flags))
+	rootCmd.AddCommand(newChannelsCmd(flags))
+	rootCmd.AddCommand(newHistoryCmd(flags))
+	rootCmd.AddCommand(newPresenceCmd(flags))
+	rootCmd.AddCommand(newProfileCmd(flags))
+	rootCmd.AddCommand(newDocsCmd(flags))
+	rootCmd.AddCommand(newStoreCmd(flags))
 
+	return rootCmd
+}
+
+func execute(args []string) error {
+	var flags rootFlags
+	rootCmd := newRootCmd(&flags)
+
+	if valuesStdinRequested(args) {
+		stdinArgs, err := loadStdinValues(rootCmd, args)
+		if err != nil {
+			var literal rootFlags
+			if c, rest, ferr := newRootCmd(&literal).Find(args); ferr == nil {
+				_ = c.ParseFlags(rest)
+			}
+			writeRootError(literal, err)
+			return err
+		}
+		args = stdinArgs
+	}
 	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
 		writeRootError(flags, err)

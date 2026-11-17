@@ -1,0 +1,144 @@
+package main
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func runWithStdin(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	t.Setenv("WACLI_STORE_DIR", t.TempDir())
+	path := filepath.Join(t.TempDir(), "stdin.json")
+	if werr := os.WriteFile(path, []byte(stdin), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	f, oerr := os.Open(path)
+	if oerr != nil {
+		t.Fatal(oerr)
+	}
+	orig := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() { os.Stdin = orig; _ = f.Close() })
+	stderr = captureRootStderr(t, func() {
+		stdout = captureRootStdout(t, func() { err = execute(args) })
+	})
+	return stdout, stderr, err
+}
+
+func TestValuesStdinRefusesUnknownFlagName(t *testing.T) {
+	_, stderr, err := runWithStdin(t, `{"flags":{"nope":"x"}}`, "--values-stdin", "messages", "show")
+	if err == nil || !strings.Contains(stderr+err.Error(), "nope") {
+		t.Fatalf("want unknown flag error naming nope, got err=%v stderr=%q", err, stderr)
+	}
+}
+
+func TestValuesStdinRefusesStoreAccountAndItself(t *testing.T) {
+	values := map[string]string{"store": `"x"`, "account": `"x"`, "values-stdin": `true`}
+	for name, value := range values {
+		_, _, err := runWithStdin(t, `{"flags":{"`+name+`":`+value+`}}`, "--values-stdin", "messages", "show")
+		want := `flag "` + name + `" cannot be set from stdin`
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("flag %s: want %q, got %v", name, want, err)
+		}
+	}
+}
+
+func TestValuesStdinRefusesEmptyAndInvalidInput(t *testing.T) {
+	cases := map[string]string{
+		"empty":        "",
+		"blank":        "  \n",
+		"invalid":      "{nope",
+		"unknown key":  `{"flags":{},"extra":1}`,
+		"two objects":  `{} {}`,
+		"flag as null": `{"flags":{"chat":null}}`,
+		"flag object":  `{"flags":{"chat":{}}}`,
+	}
+	for name, input := range cases {
+		_, _, err := runWithStdin(t, input, "--values-stdin", "messages", "show")
+		if err == nil || !strings.Contains(err.Error(), "values-stdin") {
+			t.Errorf("%s: want values-stdin error, got %v", name, err)
+		}
+	}
+}
+
+func TestValuesStdinKeepsDashValuesLiteral(t *testing.T) {
+	_, stderr, err := runWithStdin(t, `{"flags":{"chat":"--to=y","id":"-x"}}`, "--values-stdin", "messages", "show")
+	if err == nil || strings.Contains(stderr, "unknown") || strings.Contains(stderr, "required") {
+		t.Fatalf("flag values were parsed as options: err=%v stderr=%q", err, stderr)
+	}
+}
+
+func TestValuesStdinKeepsDashPositionalLiteral(t *testing.T) {
+	stdout, stderr, err := runWithStdin(t, `{"args":["-x"]}`, "--values-stdin", "--json", "contacts", "search")
+	if err != nil {
+		t.Fatalf("positional -x refused: %v %q", err, stderr)
+	}
+	if !strings.Contains(stdout, `"success":true`) {
+		t.Fatalf("unexpected output %q", stdout)
+	}
+}
+
+func TestValuesStdinPositionalAfterExistingDoubleDash(t *testing.T) {
+	stdout, stderr, err := runWithStdin(t, `{"args":["--later"]}`, "--values-stdin", "--json", "contacts", "search", "--", "-x")
+	if err == nil || !strings.Contains(err.Error()+stderr, "accepts 1 arg") {
+		t.Fatalf("want two positionals refused by arg count, got err=%v out=%q", err, stdout)
+	}
+}
+
+func TestValuesStdinHelpIsNotAFlagName(t *testing.T) {
+	_, _, err := runWithStdin(t, `{"flags":{"help":true}}`, "--values-stdin", "messages", "show")
+	if err == nil {
+		t.Fatal("help is not a defined flag name and must be refused")
+	}
+}
+
+func TestValuesStdinLeavesNoStdinForPrompts(t *testing.T) {
+	_, _, _ = runWithStdin(t, `{}`, "--values-stdin", "--json", "contacts", "search", "x")
+	buf := make([]byte, 1)
+	n, _ := os.Stdin.Read(buf)
+	if n != 0 || isInteractive() {
+		t.Fatalf("stdin must be exhausted and non-interactive after the values are read")
+	}
+}
+
+func TestValuesStdinErrorsFollowJSONAndEventsFlags(t *testing.T) {
+	bad := `{"flags":{"limit":"abc"}}`
+	_, stderr, err := runWithStdin(t, bad, "--json", "--values-stdin", "messages", "list")
+	if err == nil {
+		t.Fatal("want an error for a bad limit")
+	}
+	var env map[string]any
+	if jerr := json.Unmarshal([]byte(strings.TrimSpace(stderr)), &env); jerr != nil || env["success"] != false {
+		t.Fatalf("--json error must be a JSON envelope, got %q (%v)", stderr, jerr)
+	}
+	_, stderr, err = runWithStdin(t, bad, "--events", "--values-stdin", "messages", "list")
+	if err == nil {
+		t.Fatal("want an error for a bad limit")
+	}
+	var ev map[string]any
+	if jerr := json.Unmarshal([]byte(strings.TrimSpace(stderr)), &ev); jerr != nil || ev["event"] != "error" {
+		t.Fatalf("--events error must be an NDJSON error event, got %q (%v)", stderr, jerr)
+	}
+	_, stderr, _ = runWithStdin(t, bad, "--values-stdin", "messages", "list")
+	if strings.HasPrefix(strings.TrimSpace(stderr), "{") {
+		t.Fatalf("plain error expected without --json, got %q", stderr)
+	}
+}
+
+func TestValuesStdinReplacesStdinWithNullDevice(t *testing.T) {
+	runWithStdin(t, `{}`, "--values-stdin", "--json", "contacts", "search", "x")
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	null, err := os.Stat(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(info, null) {
+		t.Fatalf("stdin must be the null device after the values are read, got %s", os.Stdin.Name())
+	}
+}
